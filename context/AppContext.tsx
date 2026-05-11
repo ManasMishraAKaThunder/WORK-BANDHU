@@ -40,6 +40,26 @@ export interface PostedJob {
   postedAt: number;
 }
 
+// Messaging types
+export interface Message {
+  id: string;
+  text: string;
+  sender: 'user' | 'manager';
+  timestamp: number;
+  read: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  jobId: string;
+  jobTitle: string;
+  companyName: string;
+  managerName: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface AppState {
   selectedLanguage: string | null;
   isLoggedIn: boolean;
@@ -56,6 +76,7 @@ interface AppState {
   profilePhoto: string | null;
   address: string;
   experience: string;
+  conversations: Conversation[];
 }
 
 interface AppContextType extends AppState {
@@ -75,6 +96,10 @@ interface AppContextType extends AppState {
   setVerifiedSkills: (skills: string[]) => Promise<void>;
   setUserRole: (role: 'worker' | 'manager') => Promise<void>;
   addPostedJob: (job: PostedJob) => Promise<void>;
+  // Messaging
+  startConversation: (jobId: string, jobTitle: string, companyName: string, managerName: string) => Conversation;
+  sendMessage: (conversationId: string, text: string, sender: 'user' | 'manager') => void;
+  getUnreadCount: () => number;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -94,6 +119,7 @@ const STORAGE_KEYS = {
   VERIFIED_SKILLS: '@workbandhu_verified_skills',
   USER_ROLE: '@workbandhu_user_role',
   POSTED_JOBS: '@workbandhu_posted_jobs',
+  CONVERSATIONS: '@workbandhu_conversations',
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -113,6 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     profilePhoto: null,
     address: '',
     experience: '',
+    conversations: [],
   });
 
   useEffect(() => {
@@ -121,7 +148,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadPersistedState = async () => {
     try {
-      const [language, loggedIn, phone, skills, onboarding, userName, recentJobs, savedJobs, photo, address, experience, verifiedSkills, userRole, postedJobs] = await Promise.all([
+      const [language, loggedIn, phone, skills, onboarding, userName, recentJobs, savedJobs, photo, address, experience, verifiedSkills, userRole, postedJobs, conversations] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.LANGUAGE),
         AsyncStorage.getItem(STORAGE_KEYS.LOGGED_IN),
         AsyncStorage.getItem(STORAGE_KEYS.PHONE),
@@ -136,6 +163,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         AsyncStorage.getItem(STORAGE_KEYS.VERIFIED_SKILLS),
         AsyncStorage.getItem(STORAGE_KEYS.USER_ROLE),
         AsyncStorage.getItem(STORAGE_KEYS.POSTED_JOBS),
+        AsyncStorage.getItem(STORAGE_KEYS.CONVERSATIONS),
       ]);
 
       if (language) {
@@ -174,6 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         profilePhoto: photo,
         address: address || '',
         experience: experience || '',
+        conversations: conversations ? JSON.parse(conversations) : [],
       });
     } catch (e) {
       console.error('Failed to load persisted state:', e);
@@ -287,6 +316,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profilePhoto: null,
       address: '',
       experience: '',
+      conversations: [],
     });
   };
 
@@ -306,6 +336,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
       AsyncStorage.setItem(STORAGE_KEYS.POSTED_JOBS, JSON.stringify(updated));
       return { ...prev, postedJobs: updated };
     });
+  };
+
+  // ===== Messaging Functions =====
+
+  const startConversation = (jobId: string, jobTitle: string, companyName: string, managerName: string): Conversation => {
+    // Check if conversation already exists for this job
+    const existing = state.conversations.find(c => c.jobId === jobId);
+    if (existing) return existing;
+
+    const newConversation: Conversation = {
+      id: `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      jobId,
+      jobTitle,
+      companyName,
+      managerName,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    setState(prev => {
+      const updated = [newConversation, ...prev.conversations];
+      AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(updated));
+      return { ...prev, conversations: updated };
+    });
+
+    return newConversation;
+  };
+
+  const sendMessage = (conversationId: string, text: string, sender: 'user' | 'manager') => {
+    const newMessage: Message = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      text,
+      sender,
+      timestamp: Date.now(),
+      read: sender === 'user',
+    };
+
+    setState(prev => {
+      const updatedConversations = prev.conversations.map(conv => {
+        if (conv.id === conversationId) {
+          return {
+            ...conv,
+            messages: [...conv.messages, newMessage],
+            updatedAt: Date.now(),
+          };
+        }
+        return conv;
+      });
+      // Sort by most recent activity
+      updatedConversations.sort((a, b) => b.updatedAt - a.updatedAt);
+      AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(updatedConversations));
+      return { ...prev, conversations: updatedConversations };
+    });
+  };
+
+  const getUnreadCount = (): number => {
+    return state.conversations.reduce((count, conv) => {
+      const unread = conv.messages.filter(m => m.sender === 'manager' && !m.read).length;
+      return count + unread;
+    }, 0);
   };
 
   return (
@@ -328,6 +419,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setVerifiedSkills,
         setUserRole,
         addPostedJob,
+        startConversation,
+        sendMessage,
+        getUnreadCount,
       }}
     >
       {children}

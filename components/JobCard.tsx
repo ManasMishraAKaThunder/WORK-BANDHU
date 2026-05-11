@@ -9,6 +9,7 @@ import Animated, {
 import { Colors, Shadows } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { JOB_CATEGORY_META, JOB_IMAGES } from '@/constants/Languages';
+import { useRouter } from 'expo-router';
 
 interface JobCardProps {
   title: string;
@@ -41,6 +42,7 @@ export default function JobCard({
   isSaved = false,
   onToggleSave,
 }: JobCardProps) {
+  const router = useRouter();
   const scale = useSharedValue(1);
   const bookmarkScale = useSharedValue(1);
   const [imgError, setImgError] = useState(false);
@@ -69,6 +71,15 @@ export default function JobCard({
     onToggleSave?.();
   };
 
+  const handleCardPress = () => {
+    // Call original onPress for tracking (recently viewed, etc.)
+    onPress?.();
+    // Navigate to job detail
+    if (jobId) {
+      router.push({ pathname: '/job-detail', params: { jobId } });
+    }
+  };
+
   // Get category-specific visual
   const catMeta = category ? JOB_CATEGORY_META[category] : null;
   const iconName = catMeta?.icon || 'business';
@@ -80,7 +91,7 @@ export default function JobCard({
   return (
     <Animated.View style={[styles.wrapper, animatedStyle]}>
       <TouchableOpacity
-        onPress={onPress}
+        onPress={handleCardPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         activeOpacity={0.9}

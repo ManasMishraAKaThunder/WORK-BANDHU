@@ -1,12 +1,16 @@
 import React from 'react';
+import { View, Text } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useTranslation } from 'react-i18next';
 import { Platform } from 'react-native';
+import { useApp } from '@/context/AppContext';
 
 export default function TabLayout() {
   const { t } = useTranslation();
+  const { getUnreadCount } = useApp();
+  const unreadCount = getUnreadCount();
 
   return (
     <Tabs
@@ -56,7 +60,33 @@ export default function TabLayout() {
         options={{
           title: t('messages'),
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubbles" size={size} color={color} />
+            <View>
+              <Ionicons name="chatbubbles" size={size} color={color} />
+              {unreadCount > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -8,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: Colors.error,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingHorizontal: 4,
+                  borderWidth: 2,
+                  borderColor: Colors.white,
+                }}>
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '800',
+                    color: '#fff',
+                  }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </View>
           ),
         }}
       />

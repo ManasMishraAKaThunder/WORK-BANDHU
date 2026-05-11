@@ -10,6 +10,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
 } from 'react-native-reanimated';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -19,16 +23,39 @@ import { useApp } from '@/context/AppContext';
 import OTPInput from '@/components/OTPInput';
 import GradientButton from '@/components/GradientButton';
 import * as Haptics from 'expo-haptics';
+import { verifyOTP, resendOTP } from '@/services/twilioOtpService';
+
+const RESEND_COOLDOWN = 30;
 
 export default function OTPScreen() {
-  const [timer, setTimer] = useState(28);
+  const [timer, setTimer] = useState(RESEND_COOLDOWN);
   const [canResend, setCanResend] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [error, setError] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const { phoneNumber, setIsLoggedIn, setOnboardingComplete } = useApp();
   const router = useRouter();
   const { role } = useLocalSearchParams<{ role?: string }>();
   const { t } = useTranslation();
   const isManager = role === 'manager';
+
+  // Shake animation for error feedback
+  const shakeX = useSharedValue(0);
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeX.value }],
+  }));
+
+  const triggerShake = () => {
+    shakeX.value = withSequence(
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withTiming(-8, { duration: 50 }),
+      withTiming(8, { duration: 50 }),
+      withTiming(-4, { duration: 50 }),
+      withTiming(0, { duration: 50 })
+    );
+  };
 
   useEffect(() => {
     if (timer > 0) {
@@ -40,31 +67,75 @@ export default function OTPScreen() {
   }, [timer]);
 
   const displayPhone = phoneNumber
-    ? `+91 ${phoneNumber}`
+    ? `+91 ${phoneNumber.slice(0, 5)} ${phoneNumber.slice(5)}`
     : '+91 XXXXXXXXXX';
 
   const handleOTPComplete = useCallback(async (code: string) => {
+    setOtpCode(code);
     setIsVerifying(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setError('');
 
-    // Simulate verification delay
-    setTimeout(async () => {
-      await setIsLoggedIn(true);
-      setIsVerifying(false);
-      if (isManager) {
-        // Managers skip skill selection and quiz
-        await setOnboardingComplete(true);
-        router.replace('/(tabs)');
+    try {
+      // Verify OTP via Twilio Verify API
+      const result = await verifyOTP(phoneNumber, code);
+
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Small delay for success feel
+        setTimeout(async () => {
+          await setIsLoggedIn(true);
+          setIsVerifying(false);
+          if (isManager) {
+            await setOnboardingComplete(true);
+            router.replace('/(tabs)');
+          } else {
+            router.push('/skills');
+          }
+        }, 600);
       } else {
-        router.push('/skills');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError(result.message);
+        setIsVerifying(false);
+        triggerShake();
       }
-    }, 1200);
-  }, []);
+    } catch (err) {
+      setError('Verification failed. Please try again.');
+      setIsVerifying(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      triggerShake();
+    }
+  }, [phoneNumber, isManager]);
 
-  const handleResend = () => {
+  const handleVerifyButton = () => {
+    if (otpCode.length === 6) {
+      handleOTPComplete(otpCode);
+    } else {
+      setError('Please enter the complete 6-digit OTP');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      triggerShake();
+    }
+  };
+
+  const handleResend = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setTimer(28);
-    setCanResend(false);
+    setIsResending(true);
+    setError('');
+
+    try {
+      const result = await resendOTP(phoneNumber);
+      if (result.success) {
+        setTimer(RESEND_COOLDOWN);
+        setCanResend(false);
+        setOtpCode('');
+      } else {
+        setError(result.message);
+      }
+    } catch (err) {
+      setError('Failed to resend OTP. Please try again.');
+    } finally {
+      setIsResending(false);
+    }
   };
 
   return (
@@ -104,10 +175,18 @@ export default function OTPScreen() {
         </Text>
       </Animated.View>
 
-      {/* OTP Input */}
-      <Animated.View entering={FadeInUp.delay(500).duration(500)} style={styles.otpSection}>
+      {/* OTP Input with shake animation */}
+      <Animated.View entering={FadeInUp.delay(500).duration(500)} style={[styles.otpSection, shakeStyle]}>
         <OTPInput length={6} onComplete={handleOTPComplete} />
       </Animated.View>
+
+      {/* Error message */}
+      {error ? (
+        <Animated.View entering={FadeIn.duration(300)} style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={16} color={Colors.error} />
+          <Text style={styles.errorText}>{error}</Text>
+        </Animated.View>
+      ) : null}
 
       {/* Dashed separator line */}
       <View style={styles.dashedLine}>
@@ -119,8 +198,10 @@ export default function OTPScreen() {
       {/* Timer with clock icon / Resend */}
       <Animated.View entering={FadeIn.delay(700)} style={styles.timerSection}>
         {canResend ? (
-          <TouchableOpacity onPress={handleResend}>
-            <Text style={styles.resendText}>{t('resendOtp')}</Text>
+          <TouchableOpacity onPress={handleResend} disabled={isResending}>
+            <Text style={[styles.resendText, isResending && styles.resendDisabled]}>
+              {isResending ? 'Sending...' : t('resendOtp')}
+            </Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.timerRow}>
@@ -137,7 +218,7 @@ export default function OTPScreen() {
       <Animated.View entering={FadeInUp.delay(800).duration(500)} style={styles.btnWrapper}>
         <GradientButton
           title={t('verify')}
-          onPress={() => handleOTPComplete('123456')}
+          onPress={handleVerifyButton}
           variant="blue"
           loading={isVerifying}
           textStyle={{ color: Colors.white }}
@@ -229,7 +310,21 @@ const styles = StyleSheet.create({
 
   // ── OTP ──
   otpSection: {
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+
+  // ── Error ──
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  errorText: {
+    color: Colors.error,
+    fontSize: 13,
+    fontWeight: '600',
   },
 
   // ── Dashed line ──
@@ -266,6 +361,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.accent,
     textDecorationLine: 'underline',
+  },
+  resendDisabled: {
+    color: Colors.textMuted,
   },
 
   bottomSpacer: {

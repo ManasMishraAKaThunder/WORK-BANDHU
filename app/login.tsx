@@ -25,6 +25,7 @@ import { Colors, Shadows } from '@/constants/Colors';
 import { useApp } from '@/context/AppContext';
 import GradientButton from '@/components/GradientButton';
 import * as Haptics from 'expo-haptics';
+import { sendOTP } from '@/services/twilioOtpService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -32,6 +33,7 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const { setPhoneNumber, setUserRole } = useApp();
   const router = useRouter();
   const { role } = useLocalSearchParams<{ role?: string }>();
@@ -54,10 +56,29 @@ export default function LoginScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
-    await setPhoneNumber(phone);
-    await setUserRole(userRole);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.push(`/otp?role=${userRole}`);
+
+    setIsSending(true);
+    setError('');
+
+    try {
+      // Send OTP via Twilio Verify API
+      const result = await sendOTP(phone);
+
+      if (result.success) {
+        await setPhoneNumber(phone);
+        await setUserRole(userRole);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        router.push(`/otp?role=${userRole}`);
+      } else {
+        setError(result.message);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+    } catch (err) {
+      setError('Something went wrong. Please try again.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -130,10 +151,11 @@ export default function LoginScreen() {
             {/* Continue button */}
             <Animated.View entering={FadeInUp.delay(700).duration(500)} style={styles.btnWrapper}>
               <GradientButton
-                title={t('continue')}
+                title={isSending ? 'Sending OTP...' : t('continue')}
                 onPress={handleContinue}
-                disabled={!isValid}
-                variant={isValid ? 'blue' : 'disabled'}
+                disabled={!isValid || isSending}
+                variant={isValid && !isSending ? 'blue' : 'disabled'}
+                loading={isSending}
                 textStyle={{ color: Colors.white }}
               />
             </Animated.View>

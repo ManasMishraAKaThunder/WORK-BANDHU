@@ -18,6 +18,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Colors, Shadows } from '@/constants/Colors';
 import { MOCK_JOBS } from '@/constants/Languages';
 import { useApp } from '@/context/AppContext';
@@ -45,8 +47,9 @@ export default function DashboardScreen() {
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const { userName, addRecentlyViewedJob, toggleSavedJob, isJobSaved } = useApp();
+  const { userName, profilePhoto, addRecentlyViewedJob, toggleSavedJob, isJobSaved } = useApp();
   const { t } = useTranslation();
+  const router = useRouter();
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -79,15 +82,26 @@ export default function DashboardScreen() {
       }
     }
 
-    // Apply search
+    // Apply search — match against title, company, location, category, and type
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      jobs = jobs.filter(j =>
-        j.title.toLowerCase().includes(q) ||
-        j.company.toLowerCase().includes(q) ||
-        j.location.toLowerCase().includes(q) ||
-        j.category.toLowerCase().includes(q)
-      );
+      const queryWords = q.split(/\s+/);
+      jobs = jobs.filter(j => {
+        const searchableText = [
+          j.title, j.company, j.location, j.category, j.type,
+        ].join(' ').toLowerCase();
+        // All query words must match somewhere in the searchable text
+        return queryWords.every(word => searchableText.includes(word));
+      });
+      // Sort by relevance: exact title match first, then category match, then the rest
+      jobs.sort((a, b) => {
+        const aTitle = a.title.toLowerCase().includes(q) ? 0 : 1;
+        const bTitle = b.title.toLowerCase().includes(q) ? 0 : 1;
+        if (aTitle !== bTitle) return aTitle - bTitle;
+        const aCat = a.category.toLowerCase().includes(q) ? 0 : 1;
+        const bCat = b.category.toLowerCase().includes(q) ? 0 : 1;
+        return aCat - bCat;
+      });
     }
 
     return jobs;
@@ -109,9 +123,24 @@ export default function DashboardScreen() {
             <Ionicons name="notifications-outline" size={22} color={Colors.text} />
             <View style={styles.notifDot} />
           </TouchableOpacity>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={20} color={Colors.primary} />
-          </View>
+          <TouchableOpacity
+            onPress={() => router.push('/(tabs)/profile')}
+            activeOpacity={0.7}
+            style={styles.avatarTouchable}
+          >
+            {profilePhoto ? (
+              <Image
+                source={{ uri: profilePhoto }}
+                style={styles.avatarImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <Ionicons name="person" size={20} color={Colors.primary} />
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
       </Animated.View>
 
@@ -310,15 +339,27 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.white,
   },
+  avatarTouchable: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+  },
   avatar: {
     width: 42,
     height: 42,
-    borderRadius: 14,
+    borderRadius: 21,
     backgroundColor: '#EEF3FF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: Colors.primary + '20',
+  },
+  avatarImage: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: Colors.accent,
   },
   searchContainer: {
     paddingHorizontal: 16,

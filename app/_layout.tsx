@@ -33,6 +33,8 @@ export default function RootLayout() {
             <Stack.Screen name="help" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="about" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="post-job" options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="job-detail" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="chat" options={{ animation: 'slide_from_right' }} />
           </Stack>
           <StatusBar style="light" />
         </AppProvider>
